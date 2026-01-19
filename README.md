@@ -1,7 +1,16 @@
 # tide-var
+This repository includes the python code of *TIDE-Var* and of *T-ResNet*, two deep neural models for the prediction of genetic variants in Mandelian diseases.
 
-Train TabM and ResNet models on the Mendelian dataset. Dataset splits are stored
-under `src/tremm/data/tensors/<dataset_folder>/<dataset_name>/`.
+*TIDE-Var*  is an implicit ensemble of deep neural networks that partially share parameters
+and in parallel contextually optimize the same objective function, borrowed from the recently proposed TabM model (Gorishniy et al., ICLR, 2025).
+
+*T-ResNet* (Tabular Residual Neural Network) adopts a modular architecture with residual connections to
+support efficient hyperparameter optimization, along with a mini-batch balancing strategy to address
+class imbalance.
+
+Datasets used for training the model are constiduted by 26-dimensional genetic, epigenetic and conservation features originally collected by Smedley et al, Am. J. Hum. Genet. 99, 595–606 (2016).
+Dataset splits used in this study are avaialble
+in `src/tremm/data/tensors/<dataset_folder>/<dataset_name>/`.
 
 ## Install
 
