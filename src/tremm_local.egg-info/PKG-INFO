@@ -1,5 +1,0 @@
-Metadata-Version: 2.4
-Name: tremm-local
-Version: 0.0.0
-Summary: Local training utilities for TabM and T-ResNet
-Requires-Python: >=3.8
