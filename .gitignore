@@ -3,6 +3,7 @@ src/tremm/__pycache__/*
 src/tremm/data/__pycache__/*
 src/tremm/data/raw_data/README
 src/tremm/data/arrow_datasets/*.arrow
+src/tremm/data/raw_data/*
 src/tremm/data/tensors/*
 src/tremm/experiments/__pycache__/*
 src/tremm/experiments/utils/__pycache__/*
