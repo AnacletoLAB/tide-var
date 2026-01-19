@@ -77,6 +77,7 @@ class InternalFold:
         yield self.valid
 
 def txt_to_arrow(input_data_path: Path, arrow_data_path: Path, files: List[str]) -> None:
+    arrow_data_path.mkdir(parents=True, exist_ok=True)
     for file in files:
         has_header = file == "data" or file == "mini_data"
 
@@ -363,28 +364,6 @@ class MendelianDataset(Dataset):
             shuffle: bool = True,
             random_seed: int = 42,
     ) -> Tuple[NExternalFold, List[InternalFold]]:
-        """
-        Create n_kfold splits with global validation set for global weight optimization.
-        
-        Args:
-            ext_test_ratio: Ratio for external test set (default 0.2 = 20%)
-            global_valid_ratio: Ratio of external train to reserve for global validation (default 0.1 = 10%)
-            num_internal_folds: Number of internal folds to create (default 5)
-            int_valid_ratio: Ratio for internal validation within each fold (default 0.2 = 20%)
-            shuffle: Whether to shuffle data before splitting
-            random_seed: Random seed for reproducibility
-            
-        Returns:
-            Tuple of (n_external_fold, list_of_internal_folds)
-            
-        Structure:
-            Full Dataset (100%)
-            ├── External Test (20%)
-            └── External Train (80%)
-                ├── Global Validation (8% of full = 10% of external train)
-                └── Available for Internal Folds (72% of full = 90% of external train)
-                    └── Split into {num_internal_folds} folds, each with {int_valid_ratio*100}% validation
-        """
         X, y = self.x_data, self.y_data
         n_ext = int(round(1 / ext_test_ratio))
         n_int = num_internal_folds  # Use direct parameter instead of deriving from ratio
@@ -488,19 +467,3 @@ class MendelianDataset(Dataset):
             internal_folds.append(internal_fold)                    
             
         return n_external_fold, internal_folds
-                    
-    def do_chrom_aware_holdout(self, chrom: Union[str, Tuple[str, ...]] = '1') -> Tuple[Subset, Subset]:
-        # Ensure chrom is iterable; if a single chromosome, make it a tuple
-        if isinstance(chrom, str):
-            chrom = (chrom,)
-
-        # Collect indices of samples that belong to the specified chromosome(s)
-        ind_test = np.concatenate([np.where(self.chromosomes == c)[0] for c in chrom])
-
-        # Define test and train subsets
-        test_data = Subset(self, ind_test)
-        total_samples = self.__len__()
-        ind_train = np.setdiff1d(np.arange(total_samples), ind_test, assume_unique=True)
-        train_data = Subset(self, ind_train)
-
-        return train_data, test_data

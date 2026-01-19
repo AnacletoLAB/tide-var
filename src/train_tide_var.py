@@ -1,9 +1,24 @@
 #!/usr/bin/env python3
+
+from train_utils import (
+    load_internal,
+    load_external,
+    inference_on_dataloader,
+    get_scores,
+    get_valid_loader,
+    compute_normalization_stats,
+    apply_normalization,
+)
+
+from tremm.data.mendelian_dataset import DatasetEntry
+
+
 import sys
 from pathlib import Path
 import multiprocessing as mp
 import argparse
 import csv
+from typing import Optional
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SRC_DIR = SCRIPT_DIR.parent / "src"
@@ -16,28 +31,20 @@ import torch.nn as nn
 from tabulate import tabulate
 from torch import Tensor
 
-import rtdl_num_embeddings  # https://github.com/yandex-research/rtdl-num-embeddings
-from tremm.data.mendelian_dataset import DatasetEntry
+import rtdl_num_embeddings  
 torch.serialization.add_safe_globals([DatasetEntry])
-
-
 from tabm import TabM
 
-from utils import (
-    load_internal,
-    load_external,
-    inference_on_dataloader,
-    get_scores,
-    get_train_loader,
-    get_valid_loader,
-    compute_normalization_stats,
-    apply_normalization,
-)
 
-# TabM global var
 share_training_batches=True
 
-DEVICE = "cuda"
+DEVICE = (
+    "cuda"
+    if torch.cuda.is_available()
+    else "mps"
+    if torch.backends.mps.is_available()
+    else "cpu"
+)
 
 def print_scores(scores: dict, floatfmt: str = ".4f"):
     rows = [(k, float(scores[k])) for k in sorted(scores)]
@@ -91,36 +98,25 @@ def train_and_evaluate(
     n_classes=2
     batch_size = 8192
 
-    # Output of load_datasets are DatasetEntry objects with two torch.tensor objects, a normalized X and Y
     train_set, valid_set, _ = load_datasets(dataset_folder_size, dataset_folder_name, model_path)
-    # These are DataLoader objects
-    train_loader = get_train_loader(train_set, balanced=True, batch_size=batch_size, neg_batch_ratio=0.8)
     valid_loader = get_valid_loader(valid_set, batch_size=batch_size)
     
     if embedding=='ple':
-        # Piecewise-linear embeddings
-        # https://github.com/yandex-research/rtdl-num-embeddings/blob/main/package/README.md#practical-notes
-        # The possible starting points are d_embedding=12 with activation=False and d_embedding=24 with activation=True. 
-        # For Transformer-like models, the embedding size is usually larger and depends on a model.
         num_embeddings = rtdl_num_embeddings.PiecewiseLinearEmbeddings(
             rtdl_num_embeddings.compute_bins(
-                train_set.X, # further args: compute bins with trees and not quantiles 
+                train_set.X, 
                 y=train_set.y,
                 regression=False,
                 tree_kwargs={'min_samples_leaf': 1, 'min_impurity_decrease': 1e-4},
-                ), # We are not using balanced like this
+                ),
             d_embedding=dim_embedding,
             activation=False,
             version='B',
         )
-        # Feature 0, 1, 2, 11, 15, 16, 20 get the following warning: 
-        # The 11-th feature has just two bin edges, which means only one bin. Strictly speaking, using a single bin for the 
-        # piecewise-linear encoding should not break anything, but it is the same as using sklearn.preprocessing.MinMaxScaler
         
     elif embedding=='periodic':
         num_embeddings = rtdl_num_embeddings.PeriodicEmbeddings(n_num_features, lite=False)
     elif embedding=='simple':
-        # Simple embeddings.
         num_embeddings = rtdl_num_embeddings.LinearReLUEmbeddings(n_num_features)
     else:
         sys.exit("Unacceptable embedding...")
@@ -215,20 +211,62 @@ def worker_eval(dataset_folder_size, dataset_folder_name, model_path, max_epochs
     return model_path.name, "eval", train_and_evaluate(dataset_folder_size, dataset_folder_name, model_path, max_epochs, k, save_model, embedding, dim_embedding)
 
 
-def run_model(k: int, dataset_folder_size: str, dataset_folder_name: str, max_epochs: int, save_model: bool, embedding: str, dim_embedding: int) -> None:
-    in_parallel  = 1
-    model_paths  = [Path(f"{i}_internal") for i in range(5)]
+def run_model(
+    k: int,
+    dataset_folder_size: str,
+    dataset_folder_name: str,
+    max_epochs: int,
+    save_model: bool,
+    embedding: str,
+    dim_embedding: int,
+    num_folds: int,
+    fold: Optional[int],
+    workers: Optional[int],
+) -> None:
+    if fold is not None:
+        model_paths = [Path(f"{fold}_internal")]
+    else:
+        model_paths = [Path(f"{i}_internal") for i in range(num_folds)]
 
-    # ─── launch workers ─────────────────────────────────────────────────────────
-    ctx = mp.get_context("spawn")
-    with ctx.Pool(processes=len(model_paths) * in_parallel) as pool:
-        results = pool.starmap(worker_eval, [ (dataset_folder_size, dataset_folder_name, mpth, max_epochs, k, save_model, embedding, dim_embedding) 
-                                                for mpth in model_paths ]
-                               )
-    # ─────────────────────────────────────────────────────────────────────────────
+    if workers is None:
+        workers = len(model_paths)
+    workers = max(1, min(workers, len(model_paths)))
+
+    if workers == 1:
+        results = [
+            worker_eval(
+                dataset_folder_size,
+                dataset_folder_name,
+                mpth,
+                max_epochs,
+                k,
+                save_model,
+                embedding,
+                dim_embedding,
+            )
+            for mpth in model_paths
+        ]
+    else:
+        ctx = mp.get_context("spawn")
+        with ctx.Pool(processes=workers) as pool:
+            results = pool.starmap(
+                worker_eval,
+                [
+                    (
+                        dataset_folder_size,
+                        dataset_folder_name,
+                        mpth,
+                        max_epochs,
+                        k,
+                        save_model,
+                        embedding,
+                        dim_embedding,
+                    )
+                    for mpth in model_paths
+                ],
+            )
     table = []
     lst   = []
-    # ─── build the per-run rows ─────────────────────────────────────────────────
     for res in results:
         model_name, run_type, scep = res
         for scse in scep:
@@ -242,8 +280,7 @@ def run_model(k: int, dataset_folder_size: str, dataset_folder_name: str, max_ep
             ])
         lst.append(sc)
     table = sorted(table, key=lambda row: (row[2], row[0][0]))
-    # ─────────────────────────────────────────────────────────────────────────────
-    table.append([""] * 7)                         # spacer before averages
+    table.append([""] * 8)
 
     def avg(lst, key): return sum(d[key] for d in lst) / len(lst) if lst else 0
 
@@ -252,24 +289,22 @@ def run_model(k: int, dataset_folder_size: str, dataset_folder_name: str, max_ep
                 f"{avg(lst,'auprc'):.4f}"
     ])
 
-    # ─── print to console ───────────────────────────────────────────────────────
     print(tabulate(table,
                    headers=["Model", "Run", "N_Epoch", "Accuracy", "F1", "Recall", "Precision", "AUPRC"],
                    tablefmt="github"))
 
-    # ─── prepare for Markdown file ────────────────────────────────────────────────────
-    headers   = ["Model", "Run", "N_Epoch", "Accuracy", "F1", "Recall", "Precision", "AUPRC"]
-    table_md  = tabulate(table, headers=headers, tablefmt="github")
-
     parent_path = Path(__file__).parent
     import datetime
-    ts         = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    out_path   = parent_path / "md_results"/ f"results_{dataset_folder_size}_{ts}_k{k}_embedding-{embedding}_demb_{dim_embedding}.md"
+    ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    out_dir = parent_path / "csv_results"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"results_{dataset_folder_size}_{ts}_k{k}_embedding-{embedding}_demb_{dim_embedding}.csv"
 
-    # ─── write Markdown file ────────────────────────────────────────────────────
-    with out_path.open("w") as f:
-        f.write(f"Used {embedding} embedding d={dim_embedding}, an average of k={k} MLPs, batch_size of 8192,\n AdamW optimizer with lr=2e-3, weight_decay=3e-4")
-        f.write(table_md + "\n\n")       # metrics first
+    headers = ["Model", "Run", "N_Epoch", "Accuracy", "F1", "Recall", "Precision", "AUPRC"]
+    with out_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(headers)
+        writer.writerows(table)
     print(f"\nSaved results and configs to {out_path}\n")
 
 if __name__ == "__main__":
@@ -278,16 +313,27 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run model with parameters.")
     parser.add_argument("-k", "--num-mlps", type=int, default=1, help="Number of MLPs to use, TabM represents an ensemble of k MLPs.")
     
-    # parser.add_argument("-d", "--data-folder", type=str, default= "kfold_full")
-    # parser.add_argument("-n", "--data-name", type=str, default="14-02-25_16-02_rand_seed_42")
-
     parser.add_argument("-d", "--data-folder", type=str, default= "kfold_100k")
-    parser.add_argument("-n", "--data-name", type=str, default="14-02-25_12-56_rand_seed_42")
+    parser.add_argument("-n", "--data-name", type=str, default="15-01-26_10-54_rand_seed_42")
 
     parser.add_argument( "-e", "--max-epochs", type=int, default=25)
-    parser.add_argument( "-s", "--save-model", action='store_true', help="Save model state dict of each fold.")
-    parser.add_argument( "-m", "--embedding", type=str, choices=['simple', 'ple', 'periodic'], default='ple')
-    parser.add_argument( "-de", "--dim-embedding", type=int, default=12, help="Dimension of the embedding, default is 12 for simple embeddings.")
+    parser.add_argument("-s", "--save-model", action='store_true', help="Save model state dict of each fold.")
+    parser.add_argument("-m", "--embedding", type=str, choices=['simple', 'ple', 'periodic'], default='ple')
+    parser.add_argument("-de", "--dim-embedding", type=int, default=12, help="Dimension of the embedding, default is 12 for simple embeddings.")
+    parser.add_argument("--num-folds", type=int, default=5, help="Number of internal folds to run.")
+    parser.add_argument("--fold", type=int, default=None, help="Run a single internal fold (0-based).")
+    parser.add_argument("--workers", type=int, default=None, help="Max parallel workers.")
     args = parser.parse_args()
 
-    run_model(args.num_mlps, args.data_folder, args.data_name, args.max_epochs, args.save_model, args.embedding, args.dim_embedding)
+    run_model(
+        args.num_mlps,
+        args.data_folder,
+        args.data_name,
+        args.max_epochs,
+        args.save_model,
+        args.embedding,
+        args.dim_embedding,
+        args.num_folds,
+        args.fold,
+        args.workers,
+    )

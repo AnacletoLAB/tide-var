@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
-"""
-Train single ResNet models either across internal folds or using the external
-(train/test) split, saving checkpoints and metrics for each experiment.
-
-Select the desired behaviour per dataset via ``DATASET_SPECS`` below.
-"""
-
 from __future__ import annotations
+
+from train_utils import (
+    apply_normalization,
+    compute_normalization_stats,
+    extract_cfg,
+    get_scores,
+    get_valid_loader,
+    inference_on_dataloader,
+    load_datasets,
+    load_external,
+    load_internal,
+)
+
+from resnet_modeling import ResNet  # type: ignore
+from tremm.data.mendelian_dataset import DatasetEntry  # type: ignore
+from tremm.experiments.utils.loaders import get_train_loader
 
 import datetime
 import json
@@ -24,6 +33,14 @@ import torch
 import torch.nn as nn
 from tabulate import tabulate
 
+DEVICE = (
+    "cuda"
+    if torch.cuda.is_available()
+    else "mps"
+    if torch.backends.mps.is_available()
+    else "cpu"
+)
+
 try:
     set_start_method("spawn", force=True)
 except RuntimeError:
@@ -39,24 +56,8 @@ NN_ENSEMBLE_DIR = SCRIPT_DIR.parent / "nn_ensemble"
 if NN_ENSEMBLE_DIR.exists():
     sys.path.insert(0, str(NN_ENSEMBLE_DIR))
 
-from utilsz import (  # type: ignore
-    apply_normalization,
-    compute_normalization_stats,
-    extract_cfg,
-    get_scores,
-    get_valid_loader,
-    inference_on_dataloader,
-    load_datasets,
-    load_external,
-    load_internal,
-)
-from resnet_modeling import ResNet  # type: ignore
-from tremm.data.mendelian_dataset import DatasetEntry  # type: ignore
-from tremm.experiments.utils.loaders import get_train_loader
 
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-
 RUNS_ROOT = SCRIPT_DIR / "single_model_runs"
 
 
@@ -64,7 +65,7 @@ RUNS_ROOT = SCRIPT_DIR / "single_model_runs"
 class DatasetSpec:
     dataset_folder_size: str
     dataset_folder_name: str
-    mode: str  # "internal" or "external"
+    mode: str  
     max_epochs: int = 30
     base_seed: int = 12345
     internal_folds: Optional[Iterable[str]] = None
@@ -72,58 +73,6 @@ class DatasetSpec:
 
 
 DATASET_SPECS: List[DatasetSpec] = [
-    # DatasetSpec(
-    #     dataset_folder_size="kfold_full",
-    #     dataset_folder_name="29-07-25_22-07_rand_seed_1",
-    #     mode="external",
-    #     max_epochs=40,
-    #     base_seed=12345,
-    # ),
-    # DatasetSpec(
-    #     dataset_folder_size="kfold_full",
-    #     dataset_folder_name="05-08-25_09-41_rand_seed_5",
-    #     mode="external",
-    #     max_epochs=40,
-    #     base_seed=12345,
-    # ),
-    # DatasetSpec(
-    #     dataset_folder_size="kfold_full",
-    #     dataset_folder_name="29-07-25_22-08_rand_seed_10",
-    #     mode="external",
-    #     max_epochs=40,
-    #     base_seed=12345,
-    # ),
-    # DatasetSpec(
-    #     dataset_folder_size="kfold_full",
-    #     dataset_folder_name="14-02-25_16-02_rand_seed_42",
-    #     mode="external",
-    #     max_epochs=40,
-    #     base_seed=12345,
-    # ),
-    # DatasetSpec(
-    #     dataset_folder_size="kfold_full",
-    #     dataset_folder_name="29-07-25_22-09_rand_seed_100",
-    #     mode="external",
-    #     max_epochs=40,
-    #     base_seed=12345,
-    # ),
-
-    # DatasetSpec(
-    #     dataset_folder_size="kfold_100k",
-    #     dataset_folder_name="14-02-25_12-56_rand_seed_42",
-    #     mode="external",
-    #     max_epochs=30,
-    #     base_seed=54321,
-    # ),
-
-    # DatasetSpec(
-    #     dataset_folder_size="kfold_1m",
-    #     dataset_folder_name="19-02-25_09-55_rand_seed_42",
-    #     mode="internal",
-    #     max_epochs=30,
-    #     base_seed=54321,
-    # ),    
-
     DatasetSpec(
         dataset_folder_size="kfold_full",
         dataset_folder_name="14-02-25_16-02_rand_seed_42_a",
@@ -131,15 +80,6 @@ DATASET_SPECS: List[DatasetSpec] = [
         max_epochs=40,
         base_seed=12345,
     ),
-    
-    # DatasetSpec(
-    #     dataset_folder_size="kfold_100k",
-    #     dataset_folder_name="14-02-25_12-56_rand_seed_42_a",
-    #     mode="external",
-    #     max_epochs=30,
-    #     base_seed=12345,
-    # ), 
-
 ]
 
 
@@ -339,7 +279,7 @@ def _train_internal_fold(
     cfg = extract_cfg(model)
 
     fold_label = f"fold_{fold_path.stem}"
-    model_path, fold_metadata = _save_model_with_metadata(
+    model_path, _ = _save_model_with_metadata(
         model=model,
         run_dir=run_dir,
         split_label=fold_label,

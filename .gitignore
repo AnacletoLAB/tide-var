@@ -1,0 +1,16 @@
+src/csv_results/*
+src/tremm/__pycache__/*
+src/tremm/data/__pycache__/*
+src/tremm/data/raw_data/README
+src/tremm/data/arrow_datasets/*.arrow
+src/tremm/data/tensors/*
+src/tremm/experiments/__pycache__/*
+src/tremm/experiments/utils/__pycache__/*
+src/tremm/scripts/__pycache__/*
+src/tremm/experiments/utils/__pycache__/*
+src/tremm/scripts/__pycache__/*
+src/tremm/scripts/__pycache__/*
+src/tremm/scripts/__pycache__/*
+src/tremm/scripts/__pycache__/*
+src/tremm/utils/__pycache__/*
+src/tremm/utils/__pycache__/*

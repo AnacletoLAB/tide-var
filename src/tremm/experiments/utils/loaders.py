@@ -14,8 +14,6 @@ from typing import Tuple
 import re
 
 from tremm.data.mendelian_dataset import DatasetEntry, ExternalFold, InternalFold
-# from tremm.experiments.train_utils.clustering import cluster_negatives_kmeans
-# from tremm.experiments.train_utils.sample_selection import mixed_negative_sampling
 
 seed = 42
 np.random.seed(seed)
@@ -243,35 +241,6 @@ def load_datasets(
                 mean=mean,
                 std=std
             )
-
-    # if clustering:
-    #     assert clustering_params is not None, "clustering_params is None"
-    #     if clustering == "kmeans":
-    #         training_set = mixed_negative_sampling(
-    #             training_set=training_set,
-    #             total_neg=1,
-    #             p_local=1,
-    #             p_global=1,
-    #             k_per_pos=2,
-    #         ) 
-
-    #         # training_set = cluster_negatives_kmeans(
-    #         #     training_set=training_set,
-    #         #     n_clusters=clustering_params["kmeans_n_clusters"],
-    #         #     samples_per_cluster=clustering_params["kmeans_samples_per_cluster"],
-    #         # ) 
-    
-    # if sample_pos:
-    #     assert sample_pos_params is not None, "clustering_params is None"
-    #     if sample_pos == "on":
-    #         training_set = mixed_negative_sampling(
-    #             training_set=training_set,
-    #             total_neg=sample_pos_params["sample_pos_total_neg"],
-    #             p_local=sample_pos_params["sample_pos_p_local"],
-    #             p_global=sample_pos_params["sample_pos_p_global"],
-    #             k_per_pos=sample_pos_params["sample_pos_k_per_pos"],
-    #         ) 
-
     
     if load_external:
         assert test_set is not None, \
