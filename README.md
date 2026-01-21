@@ -1,5 +1,5 @@
 # tide-var
-This repository includes the python code of *TIDE-Var* and of *T-ResNet*, two deep neural models for the prediction of genetic variants in Mandelian diseases.
+This repository includes the python code of *TIDE-Var* and of *T-ResNet*, two deep neural models for the prediction of genetic variants in Mendelian diseases.
 
 *TIDE-Var*  is an implicit ensemble of deep neural networks that partially share parameters
 and in parallel contextually optimize the same objective function, borrowed from the recently proposed TabM model (Gorishniy et al., ICLR, 2025).
